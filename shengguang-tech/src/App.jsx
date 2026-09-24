@@ -321,6 +321,7 @@ export function App() {
               </a>
             );
           })}
+          <a href="/forum" onClick={closeMenu}>论坛</a>
         </nav>
       </header>
 

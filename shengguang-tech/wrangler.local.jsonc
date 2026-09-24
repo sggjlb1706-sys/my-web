@@ -1,0 +1,13 @@
+{
+  "name": "shengguang-forum-local",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-09-15",
+  "d1_databases": [
+    {
+      "binding": "FORUM_DB",
+      "database_name": "shengguang-forum-local",
+      "database_id": "local-forum",
+      "preview_database_id": "local-forum"
+    }
+  ]
+}
