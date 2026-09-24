@@ -2,6 +2,8 @@ const encoder = new TextEncoder();
 const SESSION_DAYS = 30;
 const PAGE_SIZE = 20;
 const REPLY_PAGE_SIZE = 40;
+const PASSWORD_ITERATIONS = 100000;
+const LEGACY_PASSWORD_ITERATIONS = 120000;
 const CATEGORIES = new Set(["notice", "technology", "discussion"]);
 const USERNAME_PATTERN = /^[\p{L}\p{N}_.-]{2,24}$/u;
 
@@ -29,9 +31,16 @@ async function sha256(value) {
 }
 
 async function passwordHash(password, salt) {
+  const prefix = `${PASSWORD_ITERATIONS}:`;
+  const current = salt.startsWith(prefix);
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: unhex(salt), iterations: 120000, hash: "SHA-256" },
+    {
+      name: "PBKDF2",
+      salt: unhex(current ? salt.slice(prefix.length) : salt),
+      iterations: current ? PASSWORD_ITERATIONS : LEGACY_PASSWORD_ITERATIONS,
+      hash: "SHA-256",
+    },
     key,
     256,
   );
@@ -141,7 +150,7 @@ async function handleAuth(context, db, segments, member) {
     const username = cleanText(body.username, 24);
     if (!USERNAME_PATTERN.test(username) || !validPassword(body.password)) return fail("姓名需为 2–24 字，密码至少 12 位。");
     const id = crypto.randomUUID();
-    const salt = randomHex();
+    const salt = `${PASSWORD_ITERATIONS}:${randomHex()}`;
     const hash = await passwordHash(body.password, salt);
     const result = await db.prepare(`
       INSERT INTO forum_members (id, username, password_salt, password_hash, role, created_at)
@@ -165,7 +174,7 @@ async function handleAuth(context, db, segments, member) {
     `).bind(codeHash, Date.now()).first();
     if (!invite) return fail("邀请码无效、已使用或已过期。", 403);
     const id = crypto.randomUUID();
-    const salt = randomHex();
+    const salt = `${PASSWORD_ITERATIONS}:${randomHex()}`;
     const hash = await passwordHash(body.password, salt);
     try {
       await db.prepare(`
