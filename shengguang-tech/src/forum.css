@@ -264,7 +264,7 @@
 .forum-search {
   height: 48px;
   display: flex;
-  margin: 28px 0 14px;
+  margin: 24px 0 12px;
   border: 1px solid rgba(241, 224, 178, 0.16);
   border-radius: 4px;
   background: rgba(8, 11, 9, 0.63);
@@ -299,7 +299,7 @@
 
 .forum-clear-search {
   max-width: 100%;
-  margin-bottom: 15px;
+  margin-bottom: 0;
   padding: 0;
   border: 0;
   color: #d6bf89;
@@ -308,6 +308,56 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.forum-section-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.forum-section-tabs button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(241, 224, 178, 0.18);
+  border-radius: 4px;
+  background: rgba(8, 11, 9, 0.5);
+  color: rgba(243, 235, 216, 0.6);
+  font-size: 12px;
+}
+
+.forum-section-tabs button[aria-pressed="true"] {
+  border-color: rgba(239, 212, 140, 0.55);
+  background: rgba(239, 212, 140, 0.12);
+  color: #fff0cb;
+}
+
+.forum-feed-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+
+.forum-feed-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  color: rgba(243, 235, 216, 0.55);
+  font-size: 12px;
+}
+
+.forum-feed-controls select {
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid rgba(241, 224, 178, 0.2);
+  border-radius: 4px;
+  background: #10130f;
+  color: #f3ebd8;
+  font-size: 12px;
 }
 
 .forum-list {
@@ -349,6 +399,17 @@
   font-weight: 500;
 }
 
+.forum-feature-label {
+  display: inline-block;
+  margin-right: 9px;
+  padding: 1px 6px;
+  border: 1px solid rgba(133, 201, 173, 0.55);
+  border-radius: 2px;
+  background: rgba(104, 177, 148, 0.11);
+  color: #c0e8d5;
+  font-weight: 500;
+}
+
 .forum-topic-title {
   display: block;
   color: #f8edd5;
@@ -371,9 +432,20 @@
 
 .forum-topic-foot {
   display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   color: rgba(243, 235, 216, 0.42);
   font-size: 11px;
+}
+
+.forum-like-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.forum-like-summary.is-active {
+  color: #b8dec9;
 }
 
 .forum-empty {
@@ -472,6 +544,8 @@
 
 .forum-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 17px;
   margin-top: 27px;
 }
@@ -479,6 +553,29 @@
 .forum-actions button {
   padding: 0;
   color: rgba(243, 235, 216, 0.47);
+}
+
+.forum-actions .forum-like-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid rgba(241, 224, 178, 0.28);
+  border-radius: 4px;
+  color: #f0dfb7;
+  font-size: 13px;
+}
+
+.forum-actions .forum-like-button.is-active {
+  border-color: rgba(133, 201, 173, 0.55);
+  background: rgba(104, 177, 148, 0.13);
+  color: #c0e8d5;
+}
+
+.forum-like-button span {
+  margin-left: 3px;
+  font-variant-numeric: tabular-nums;
 }
 
 .forum-replies-heading {
@@ -740,6 +837,15 @@
   line-height: 1.7;
 }
 
+.forum-auth-link {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d8c28b;
+  font-size: 12px;
+}
+
 .forum-mode-switch {
   display: flex;
   gap: 5px;
@@ -860,6 +966,44 @@
   font-size: 12px;
 }
 
+.forum-admin-reset {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.forum-admin-reset label {
+  display: grid;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  color: #decda5;
+  font-size: 12px;
+}
+
+.forum-admin-reset input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 11px;
+  border: 1px solid rgba(241, 224, 178, 0.19);
+  border-radius: 4px;
+  background: #080b09;
+  color: #f3ebd8;
+}
+
+.forum-admin-reset .forum-primary {
+  margin-top: 0;
+}
+
+.forum-reset-result {
+  margin-top: 16px;
+}
+
+.forum-reset-result .forum-invite {
+  margin-top: 4px;
+}
+
 .forum-report {
   padding: 18px 0;
   border-bottom: 1px solid rgba(241, 224, 178, 0.12);
@@ -911,6 +1055,9 @@
   .forum-modal .forum-math-editor textarea { min-height: 150px; }
   .forum-modal .forum-math-preview { max-height: 190px; }
   .forum-topic-foot { gap: 12px; }
+  .forum-feed-controls { flex-wrap: wrap; }
+  .forum-admin-reset { align-items: stretch; flex-direction: column; }
+  .forum-admin-reset .forum-primary { align-self: start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

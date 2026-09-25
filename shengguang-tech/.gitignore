@@ -3,8 +3,10 @@ dist/
 qa/
 .wrangler/
 wrangler.jsonc
+wrangler.local.jsonc
 .dev.vars*
 !.dev.vars.example
+*-backup-*.sql
 
 .env
 .env.*

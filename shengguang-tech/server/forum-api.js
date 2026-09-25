@@ -5,6 +5,7 @@ const REPLY_PAGE_SIZE = 40;
 const PASSWORD_ITERATIONS = 100000;
 const LEGACY_PASSWORD_ITERATIONS = 120000;
 const CATEGORIES = new Set(["notice", "technology", "discussion"]);
+const DISCUSSION_SECTIONS = new Set(["academic", "entertainment", "general"]);
 const USERNAME_PATTERN = /^[\p{L}\p{N}_.-]{2,24}$/u;
 
 function json(data, status = 200, headers = {}) {
@@ -111,6 +112,7 @@ async function cleanupTransientData(db, now = Date.now()) {
   await db.prepare("DELETE FROM forum_invites WHERE expires_at <= ?").bind(now).run();
   await db.prepare("DELETE FROM forum_sessions WHERE expires_at <= ?").bind(now).run();
   await db.prepare("DELETE FROM forum_login_limits WHERE reset_at <= ?").bind(now).run();
+  await db.prepare("DELETE FROM forum_password_resets WHERE expires_at <= ?").bind(now).run();
 }
 
 async function loginLimited(db, request) {
@@ -223,6 +225,31 @@ async function handleAuth(context, db, segments, member) {
     await cleanupTransientData(db);
     return issueSession(db, request, { id: account.id, username: account.username, displayName: account.display_name || account.username, role: account.role });
   }
+  if (action === "reset-password" && request.method === "POST") {
+    const body = await readBody(request);
+    const code = cleanText(body.code, 64).toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(code) || !validPassword(body.password)) return fail("请填写有效的重设码和至少 12 位的新密码。");
+    const codeHash = await sha256(code);
+    const now = Date.now();
+    const reset = await db.prepare("SELECT member_id FROM forum_password_resets WHERE code_hash = ? AND expires_at > ?")
+      .bind(codeHash, now).first();
+    if (!reset) return fail("重设码无效或已过期，请联系管理员重新获取。", 403);
+    const salt = `${PASSWORD_ITERATIONS}:${randomHex()}`;
+    const hash = await passwordHash(body.password, salt);
+    const claimTime = Date.now();
+    const results = await db.batch([
+      db.prepare(`UPDATE forum_members SET password_salt = ?, password_hash = ?
+        WHERE id = (SELECT member_id FROM forum_password_resets WHERE code_hash = ? AND expires_at > ?)`)
+        .bind(salt, hash, codeHash, claimTime),
+      db.prepare(`DELETE FROM forum_sessions WHERE member_id =
+        (SELECT member_id FROM forum_password_resets WHERE code_hash = ? AND expires_at > ?)`)
+        .bind(codeHash, claimTime),
+      db.prepare("DELETE FROM forum_password_resets WHERE code_hash = ? AND expires_at > ?")
+        .bind(codeHash, claimTime),
+    ]);
+    if (!results[0].meta.changes || !results[2].meta.changes) return fail("重设码无效或已过期，请联系管理员重新获取。", 403);
+    return json({ ok: true }, 200, { "Set-Cookie": cookie(request, "", 0) });
+  }
   if (action === "logout" && request.method === "POST") {
     const token = request.headers.get("Cookie")?.match(/(?:^|;\s*)forum_session=([^;]+)/)?.[1];
     if (token) await db.prepare("DELETE FROM forum_sessions WHERE token_hash = ?").bind(await sha256(token)).run();
@@ -237,23 +264,33 @@ async function handleTopics(db, request, segments, member) {
   if (!id && request.method === "GET") {
     const url = new URL(request.url);
     const category = url.searchParams.get("category") || "";
+    const section = url.searchParams.get("section") || "";
+    const sort = url.searchParams.get("sort") || "new";
     const search = cleanText(url.searchParams.get("q"), 80);
     if (category && !CATEGORIES.has(category)) return fail("分类不存在。");
+    if (section && (category !== "discussion" || !DISCUSSION_SECTIONS.has(section))) return fail("共议分区不存在。");
+    if (sort !== "new" && sort !== "likes") return fail("排序方式不存在。");
     const conditions = ["t.is_hidden = 0"];
     const args = [];
     if (category) { conditions.push("t.category = ?"); args.push(category); }
+    if (section) { conditions.push("COALESCE(t.discussion_section, 'general') = ?"); args.push(section); }
     if (search) { conditions.push("(t.title LIKE ? OR t.body LIKE ?)"); args.push(`%${search}%`, `%${search}%`); }
     const where = conditions.join(" AND ");
     const page = pageNumber(url.searchParams.get("page"));
     const count = await db.prepare(`SELECT COUNT(*) AS total FROM forum_topics t WHERE ${where}`).bind(...args).first();
     const rows = await db.prepare(`
-      SELECT t.id, t.category, t.title, SUBSTR(t.body, 1, 180) AS body, t.is_locked AS isLocked,
-        t.is_pinned AS isPinned, t.created_at AS createdAt, t.updated_at AS updatedAt,
+      SELECT t.id, t.category,
+        CASE WHEN t.category = 'discussion' THEN COALESCE(t.discussion_section, 'general') END AS discussionSection,
+        t.title, SUBSTR(t.body, 1, 180) AS body, t.is_locked AS isLocked,
+        t.is_pinned AS isPinned, t.is_featured AS isFeatured, t.created_at AS createdAt, t.updated_at AS updatedAt,
         COALESCE(m.display_name, m.username) AS author,
-        (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.is_hidden = 0) AS replyCount
+        (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.is_hidden = 0) AS replyCount,
+        (SELECT COUNT(*) FROM forum_topic_likes l WHERE l.topic_id = t.id) AS likeCount,
+        EXISTS(SELECT 1 FROM forum_topic_likes l WHERE l.topic_id = t.id AND l.member_id = ?) AS likedByMe
       FROM forum_topics t JOIN forum_members m ON m.id = t.author_id
-      WHERE ${where} ORDER BY t.is_pinned DESC, t.updated_at DESC, t.id DESC LIMIT ? OFFSET ?
-    `).bind(...args, PAGE_SIZE, (page - 1) * PAGE_SIZE).all();
+      WHERE ${where} ORDER BY t.is_featured DESC, t.is_pinned DESC,
+        ${sort === "likes" ? "likeCount DESC," : ""} t.created_at DESC, t.id DESC LIMIT ? OFFSET ?
+    `).bind(member?.id || "", ...args, PAGE_SIZE, (page - 1) * PAGE_SIZE).all();
     return json({ topics: rows.results, total: count.total, page, pageSize: PAGE_SIZE });
   }
   if (!id && request.method === "POST") {
@@ -263,18 +300,20 @@ async function handleTopics(db, request, segments, member) {
     const title = cleanText(body.title, 100);
     const content = cleanText(body.body, 10000);
     const category = cleanText(body.category, 20);
+    const section = category === "discussion" ? cleanText(body.discussionSection ?? "general", 20) : null;
     if (title.length < 4 || title.length > 100 || content.length < 20 || content.length > 10000 || !CATEGORIES.has(category)) {
       return fail("请选择分类，并填写 4–100 字标题及 20–10000 字正文。");
     }
+    if (category === "discussion" && !DISCUSSION_SECTIONS.has(section)) return fail("请选择有效的共议分区。");
     if (category === "notice" && member.role !== "admin") return fail("公告只可由管理员发布。", 403);
     const previous = await db.prepare("SELECT created_at AS createdAt FROM forum_topics WHERE author_id = ? ORDER BY created_at DESC LIMIT 1").bind(member.id).first();
     if (previous && Date.now() - previous.createdAt < 20000) return fail("请稍等 20 秒后再发布新主题。", 429);
     const topicId = crypto.randomUUID();
     const now = Date.now();
     await db.prepare(`
-      INSERT INTO forum_topics (id, author_id, category, title, body, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(topicId, member.id, category, title, content, now, now).run();
+      INSERT INTO forum_topics (id, author_id, category, discussion_section, title, body, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(topicId, member.id, category, section, title, content, now, now).run();
     return json({ id: topicId }, 201);
   }
   if (!id) return null;
@@ -285,7 +324,7 @@ async function handleTopics(db, request, segments, member) {
     if (!current) return fail("主题不存在。", 404);
     if (current.authorId !== member.id && member.role !== "admin") return fail("只能修改自己的主题。", 403);
     if (request.method === "DELETE") {
-      await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0 WHERE id = ?").bind(id).run();
+      await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0, is_featured = 0 WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
     const body = await readBody(request);
@@ -300,12 +339,16 @@ async function handleTopics(db, request, segments, member) {
     const url = new URL(request.url);
     const page = pageNumber(url.searchParams.get("page"));
     const topic = await db.prepare(`
-      SELECT t.id, t.category, t.title, t.body, t.is_locked AS isLocked,
-        t.is_pinned AS isPinned, t.created_at AS createdAt, t.updated_at AS updatedAt,
-        COALESCE(m.display_name, m.username) AS author, m.id AS authorId
+      SELECT t.id, t.category,
+        CASE WHEN t.category = 'discussion' THEN COALESCE(t.discussion_section, 'general') END AS discussionSection,
+        t.title, t.body, t.is_locked AS isLocked, t.is_pinned AS isPinned,
+        t.is_featured AS isFeatured, t.created_at AS createdAt, t.updated_at AS updatedAt,
+        COALESCE(m.display_name, m.username) AS author, m.id AS authorId,
+        (SELECT COUNT(*) FROM forum_topic_likes l WHERE l.topic_id = t.id) AS likeCount,
+        EXISTS(SELECT 1 FROM forum_topic_likes l WHERE l.topic_id = t.id AND l.member_id = ?) AS likedByMe
       FROM forum_topics t JOIN forum_members m ON m.id = t.author_id
       WHERE t.id = ? AND t.is_hidden = 0
-    `).bind(id).first();
+    `).bind(member?.id || "", id).first();
     if (!topic) return fail("主题不存在或已被移除。", 404);
     const count = await db.prepare("SELECT COUNT(*) AS total FROM forum_replies WHERE topic_id = ? AND is_hidden = 0").bind(id).first();
     const replies = await db.prepare(`
@@ -314,6 +357,22 @@ async function handleTopics(db, request, segments, member) {
       WHERE r.topic_id = ? AND r.is_hidden = 0 ORDER BY r.created_at, r.id LIMIT ? OFFSET ?
     `).bind(id, REPLY_PAGE_SIZE, (page - 1) * REPLY_PAGE_SIZE).all();
     return json({ topic, replies: replies.results, totalReplies: count.total, page, pageSize: REPLY_PAGE_SIZE });
+  }
+  if (action === "like" && ["POST", "DELETE"].includes(request.method)) {
+    const denied = requireMember(member);
+    if (denied) return denied;
+    const topic = await db.prepare("SELECT author_id AS authorId FROM forum_topics WHERE id = ? AND is_hidden = 0").bind(id).first();
+    if (!topic) return fail("主题不存在。", 404);
+    if (topic.authorId === member.id) return fail("不能点亮自己的主题。", 403);
+    if (request.method === "POST") {
+      await db.prepare(`INSERT OR IGNORE INTO forum_topic_likes (topic_id, member_id, created_at)
+        SELECT id, ?, ? FROM forum_topics WHERE id = ? AND is_hidden = 0 AND author_id <> ?`)
+        .bind(member.id, Date.now(), id, member.id).run();
+    } else {
+      await db.prepare("DELETE FROM forum_topic_likes WHERE topic_id = ? AND member_id = ?").bind(id, member.id).run();
+    }
+    const count = await db.prepare("SELECT COUNT(*) AS total FROM forum_topic_likes WHERE topic_id = ?").bind(id).first();
+    return json({ likeCount: count.total, likedByMe: request.method === "POST" });
   }
   if (action === "replies" && request.method === "POST") {
     const denied = requireMember(member);
@@ -390,6 +449,22 @@ async function handleAdmin(db, request, segments, member) {
       .bind(await sha256(code), member.id, now, now + 7 * 86400000).run();
     return json({ code, expiresAt: now + 7 * 86400000 }, 201);
   }
+  if (resource === "password-resets" && request.method === "POST" && !id) {
+    const body = await readBody(request);
+    const username = cleanText(body.username, 24);
+    if (!USERNAME_PATTERN.test(username)) return fail("请填写有效的成员登录名。");
+    const target = await db.prepare("SELECT id, username FROM forum_members WHERE username = ?").bind(username).first();
+    if (!target) return fail("没有找到这个登录名。", 404);
+    await cleanupTransientData(db);
+    const code = randomHex(32);
+    const now = Date.now();
+    await db.prepare(`INSERT INTO forum_password_resets (member_id, code_hash, created_by, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(member_id) DO UPDATE SET code_hash = excluded.code_hash,
+        created_by = excluded.created_by, created_at = excluded.created_at, expires_at = excluded.expires_at`)
+      .bind(target.id, await sha256(code), member.id, now, now + 30 * 60000).run();
+    return json({ code, username: target.username, expiresAt: now + 30 * 60000 }, 201);
+  }
   if (resource === "reports" && request.method === "GET" && !id) {
     const result = await db.prepare(`
       SELECT r.id, r.target_type AS targetType, r.target_id AS targetId, r.reason,
@@ -428,8 +503,23 @@ async function handleAdmin(db, request, segments, member) {
     `).bind(id).run();
     return result.meta.changes ? json({ ok: true }) : fail("最多只能置顶 3 条主题。", 409);
   }
+  if (resource === "topics" && id && request.method === "POST" && action === "feature") {
+    const body = await readBody(request);
+    if (typeof body.featured !== "boolean") return fail("请指定是否设为精品。", 400);
+    const result = await db.prepare("UPDATE forum_topics SET is_featured = ? WHERE id = ? AND is_hidden = 0")
+      .bind(Number(body.featured), id).run();
+    return result.meta.changes ? json({ ok: true }) : fail("主题不存在。", 404);
+  }
+  if (resource === "topics" && id && request.method === "POST" && action === "section") {
+    const body = await readBody(request);
+    const section = cleanText(body.discussionSection, 20);
+    if ("category" in body || !DISCUSSION_SECTIONS.has(section)) return fail("只能调整共议分区。");
+    const result = await db.prepare("UPDATE forum_topics SET discussion_section = ? WHERE id = ? AND category = 'discussion' AND is_hidden = 0")
+      .bind(section, id).run();
+    return result.meta.changes ? json({ ok: true }) : fail("共议主题不存在。", 404);
+  }
   if (resource === "topics" && id && request.method === "DELETE" && !action) {
-    const result = await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0 WHERE id = ? AND is_hidden = 0").bind(id).run();
+    const result = await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0, is_featured = 0 WHERE id = ? AND is_hidden = 0").bind(id).run();
     return result.meta.changes ? json({ ok: true }) : fail("主题不存在。", 404);
   }
   if (resource === "replies" && id && request.method === "DELETE" && !action) {

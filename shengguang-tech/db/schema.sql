@@ -27,14 +27,25 @@ CREATE TABLE IF NOT EXISTS forum_sessions (
 );
 CREATE INDEX IF NOT EXISTS forum_sessions_member ON forum_sessions(member_id);
 
+CREATE TABLE IF NOT EXISTS forum_password_resets (
+  member_id TEXT PRIMARY KEY REFERENCES forum_members(id) ON DELETE CASCADE,
+  code_hash TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL REFERENCES forum_members(id),
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS forum_password_resets_expiry ON forum_password_resets(expires_at);
+
 CREATE TABLE IF NOT EXISTS forum_topics (
   id TEXT PRIMARY KEY,
   author_id TEXT NOT NULL REFERENCES forum_members(id),
   category TEXT NOT NULL CHECK (category IN ('notice', 'technology', 'discussion')),
+  discussion_section TEXT CHECK (discussion_section IN ('academic', 'entertainment', 'general') OR discussion_section IS NULL),
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   is_locked INTEGER NOT NULL DEFAULT 0,
   is_pinned INTEGER NOT NULL DEFAULT 0,
+  is_featured INTEGER NOT NULL DEFAULT 0,
   is_hidden INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -43,6 +54,16 @@ CREATE INDEX IF NOT EXISTS forum_topics_feed ON forum_topics(is_hidden, updated_
 CREATE INDEX IF NOT EXISTS forum_topics_category ON forum_topics(category, is_hidden, updated_at DESC);
 CREATE INDEX IF NOT EXISTS forum_topics_pinned_feed ON forum_topics(is_hidden, is_pinned DESC, updated_at DESC);
 CREATE INDEX IF NOT EXISTS forum_topics_pinned_category ON forum_topics(category, is_hidden, is_pinned DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS forum_topics_section ON forum_topics(category, discussion_section, is_hidden, created_at DESC);
+CREATE INDEX IF NOT EXISTS forum_topics_featured_feed ON forum_topics(is_hidden, is_featured DESC, is_pinned DESC, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS forum_topic_likes (
+  topic_id TEXT NOT NULL REFERENCES forum_topics(id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL REFERENCES forum_members(id) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (topic_id, member_id)
+);
+CREATE INDEX IF NOT EXISTS forum_topic_likes_member ON forum_topic_likes(member_id);
 
 CREATE TABLE IF NOT EXISTS forum_replies (
   id TEXT PRIMARY KEY,
