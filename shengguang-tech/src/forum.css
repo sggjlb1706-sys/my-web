@@ -77,7 +77,14 @@
 .forum-header nav {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: 6px;
+}
+
+.forum-header nav .forum-account-button {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .forum-header nav a,
@@ -332,6 +339,16 @@
   font-size: 11px;
 }
 
+.forum-pin-label {
+  display: inline-block;
+  margin-right: 9px;
+  padding: 1px 6px;
+  border: 1px solid rgba(239, 212, 140, 0.42);
+  border-radius: 2px;
+  color: #f7e2ac;
+  font-weight: 500;
+}
+
 .forum-topic-title {
   display: block;
   color: #f8edd5;
@@ -427,6 +444,29 @@
   font-size: 15px;
   line-height: 1.95;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.forum-math-inline {
+  white-space: normal;
+}
+
+.forum-math-display {
+  display: block;
+  max-width: 100%;
+  margin: 14px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+  white-space: normal;
+}
+
+.forum-math-display .katex-display {
+  margin: 0;
+}
+
+.forum-math-fallback {
+  border-bottom: 1px dashed rgba(239, 212, 140, 0.45);
   overflow-wrap: anywhere;
 }
 
@@ -623,6 +663,76 @@
   margin-top: 6px;
 }
 
+.forum-profile-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.forum-profile-actions > button:first-child {
+  border: 0;
+  background: transparent;
+  color: rgba(243, 235, 216, 0.65);
+  font-size: 12px;
+}
+
+.forum-math-editor {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.forum-math-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.forum-math-editor-head label {
+  display: block;
+  color: #decda5;
+  font-size: 12px;
+}
+
+.forum-reply-form .forum-math-editor-head label {
+  font-size: 14px;
+}
+
+.forum-math-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.forum-math-tools button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid rgba(241, 224, 178, 0.16);
+  border-radius: 3px;
+  background: transparent;
+  color: rgba(243, 235, 216, 0.7);
+  font-size: 12px;
+}
+
+.forum-math-tools button:hover,
+.forum-math-tools button[aria-pressed="true"] {
+  border-color: rgba(239, 212, 140, 0.5);
+  color: #fff0cb;
+  background: rgba(239, 212, 140, 0.08);
+}
+
+.forum-math-preview {
+  max-height: 320px;
+  min-height: 76px;
+  overflow: auto;
+  padding: 16px 2px;
+  border-top: 1px solid rgba(241, 224, 178, 0.16);
+  border-bottom: 1px solid rgba(241, 224, 178, 0.16);
+}
+
 .forum-form-note {
   margin: 0;
   color: rgba(243, 235, 216, 0.6);
@@ -790,6 +900,7 @@
   .forum-header nav { gap: 0; }
   .forum-header nav a,
   .forum-header nav button { padding: 0 7px; font-size: 12px; }
+  .forum-header nav .forum-account-button { max-width: 84px; }
   .forum-header nav a:first-child { display: none; }
   .forum-intro { min-height: 216px; display: block; padding-top: 58px; }
   .forum-intro h1 { font-size: 46px; }
@@ -797,6 +908,8 @@
   .forum-toolbar h2 { font-size: 28px; }
   .forum-topic-title { font-size: 22px; }
   .forum-modal { padding: 19px; }
+  .forum-modal .forum-math-editor textarea { min-height: 150px; }
+  .forum-modal .forum-math-preview { max-height: 190px; }
   .forum-topic-foot { gap: 12px; }
 }
 

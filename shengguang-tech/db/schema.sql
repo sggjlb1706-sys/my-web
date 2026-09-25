@@ -3,12 +3,14 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS forum_members (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  display_name TEXT,
   password_salt TEXT NOT NULL,
   password_hash TEXT NOT NULL,
   invite_hash TEXT UNIQUE,
   role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
   created_at INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS forum_members_display_name ON forum_members(display_name COLLATE NOCASE) WHERE display_name IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS forum_invites (
   code_hash TEXT PRIMARY KEY,
@@ -32,12 +34,15 @@ CREATE TABLE IF NOT EXISTS forum_topics (
   title TEXT NOT NULL,
   body TEXT NOT NULL,
   is_locked INTEGER NOT NULL DEFAULT 0,
+  is_pinned INTEGER NOT NULL DEFAULT 0,
   is_hidden INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS forum_topics_feed ON forum_topics(is_hidden, updated_at DESC);
 CREATE INDEX IF NOT EXISTS forum_topics_category ON forum_topics(category, is_hidden, updated_at DESC);
+CREATE INDEX IF NOT EXISTS forum_topics_pinned_feed ON forum_topics(is_hidden, is_pinned DESC, updated_at DESC);
+CREATE INDEX IF NOT EXISTS forum_topics_pinned_category ON forum_topics(category, is_hidden, is_pinned DESC, updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS forum_replies (
   id TEXT PRIMARY KEY,

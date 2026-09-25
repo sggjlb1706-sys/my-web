@@ -67,7 +67,7 @@ async function sessionMember(db, request) {
   const token = request.headers.get("Cookie")?.match(/(?:^|;\s*)forum_session=([^;]+)/)?.[1];
   if (!token) return null;
   return db.prepare(`
-    SELECT m.id, m.username, m.role FROM forum_sessions s
+    SELECT m.id, m.username, COALESCE(m.display_name, m.username) AS displayName, m.role FROM forum_sessions s
     JOIN forum_members m ON m.id = s.member_id
     WHERE s.token_hash = ? AND s.expires_at > ?
   `).bind(await sha256(token), Date.now()).first();
@@ -107,6 +107,12 @@ function pageNumber(value) {
   return Number.isSafeInteger(number) && number > 0 ? Math.min(number, 10000) : 1;
 }
 
+async function cleanupTransientData(db, now = Date.now()) {
+  await db.prepare("DELETE FROM forum_invites WHERE expires_at <= ?").bind(now).run();
+  await db.prepare("DELETE FROM forum_sessions WHERE expires_at <= ?").bind(now).run();
+  await db.prepare("DELETE FROM forum_login_limits WHERE reset_at <= ?").bind(now).run();
+}
+
 async function loginLimited(db, request) {
   const ip = request.headers.get("CF-Connecting-IP") || "local";
   const bucket = await sha256(`login:${ip}`);
@@ -142,6 +148,22 @@ async function handleAuth(context, db, segments, member) {
     return json({ setupRequired: !admin, setupEnabled: Boolean(env.FORUM_BOOTSTRAP_KEY) });
   }
   if (action === "me" && request.method === "GET") return json({ member });
+  if (action === "me" && request.method === "PATCH") {
+    const denied = requireMember(member);
+    if (denied) return denied;
+    const body = await readBody(request);
+    const displayName = cleanText(body.displayName, 24);
+    if (!USERNAME_PATTERN.test(displayName)) return fail("昵称需为 2–24 字，可使用中英文、数字及 _ . -。", 400);
+    const taken = await db.prepare("SELECT id FROM forum_members WHERE COALESCE(display_name, username) = ? COLLATE NOCASE AND id <> ?")
+      .bind(displayName, member.id).first();
+    if (taken) return fail("该昵称已被使用。", 409);
+    try {
+      await db.prepare("UPDATE forum_members SET display_name = ? WHERE id = ?").bind(displayName, member.id).run();
+    } catch {
+      return fail("该昵称已被使用。", 409);
+    }
+    return json({ member: { ...member, displayName } });
+  }
   if (action === "bootstrap" && request.method === "POST") {
     if (!env.FORUM_BOOTSTRAP_KEY || env.FORUM_BOOTSTRAP_KEY.length < 24) return fail("管理员初始化密钥尚未配置。", 503);
     const body = await readBody(request);
@@ -153,11 +175,11 @@ async function handleAuth(context, db, segments, member) {
     const salt = `${PASSWORD_ITERATIONS}:${randomHex()}`;
     const hash = await passwordHash(body.password, salt);
     const result = await db.prepare(`
-      INSERT INTO forum_members (id, username, password_salt, password_hash, role, created_at)
-      SELECT ?, ?, ?, ?, 'admin', ? WHERE NOT EXISTS (SELECT 1 FROM forum_members WHERE role = 'admin')
-    `).bind(id, username, salt, hash, Date.now()).run();
+      INSERT INTO forum_members (id, username, display_name, password_salt, password_hash, role, created_at)
+      SELECT ?, ?, ?, ?, ?, 'admin', ? WHERE NOT EXISTS (SELECT 1 FROM forum_members WHERE role = 'admin')
+    `).bind(id, username, username, salt, hash, Date.now()).run();
     if (!result.meta.changes) return fail("管理员已经建立。", 409);
-    return issueSession(db, request, { id, username, role: "admin" });
+    return issueSession(db, request, { id, username, displayName: username, role: "admin" });
   }
   if (action === "register" && request.method === "POST") {
     const body = await readBody(request);
@@ -178,13 +200,15 @@ async function handleAuth(context, db, segments, member) {
     const hash = await passwordHash(body.password, salt);
     try {
       await db.prepare(`
-        INSERT INTO forum_members (id, username, password_salt, password_hash, invite_hash, role, created_at)
-        VALUES (?, ?, ?, ?, ?, 'member', ?)
-      `).bind(id, username, salt, hash, codeHash, Date.now()).run();
+        INSERT INTO forum_members (id, username, display_name, password_salt, password_hash, invite_hash, role, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'member', ?)
+      `).bind(id, username, username, salt, hash, codeHash, Date.now()).run();
     } catch {
-      return fail("该姓名已存在，或邀请码已经使用。", 409);
+      return fail("登录名或昵称已存在，或邀请码已经使用。", 409);
     }
-    return issueSession(db, request, { id, username, role: "member" });
+    await db.prepare("DELETE FROM forum_invites WHERE code_hash = ?").bind(codeHash).run();
+    await cleanupTransientData(db);
+    return issueSession(db, request, { id, username, displayName: username, role: "member" });
   }
   if (action === "login" && request.method === "POST") {
     if (await loginLimited(db, request)) return fail("尝试次数过多，请 15 分钟后再试。", 429);
@@ -196,7 +220,8 @@ async function handleAuth(context, db, segments, member) {
       await recordLoginFailure(db, request);
       return fail("姓名或密码不正确。", 401);
     }
-    return issueSession(db, request, { id: account.id, username: account.username, role: account.role });
+    await cleanupTransientData(db);
+    return issueSession(db, request, { id: account.id, username: account.username, displayName: account.display_name || account.username, role: account.role });
   }
   if (action === "logout" && request.method === "POST") {
     const token = request.headers.get("Cookie")?.match(/(?:^|;\s*)forum_session=([^;]+)/)?.[1];
@@ -223,10 +248,11 @@ async function handleTopics(db, request, segments, member) {
     const count = await db.prepare(`SELECT COUNT(*) AS total FROM forum_topics t WHERE ${where}`).bind(...args).first();
     const rows = await db.prepare(`
       SELECT t.id, t.category, t.title, SUBSTR(t.body, 1, 180) AS body, t.is_locked AS isLocked,
-        t.created_at AS createdAt, t.updated_at AS updatedAt, m.username AS author,
+        t.is_pinned AS isPinned, t.created_at AS createdAt, t.updated_at AS updatedAt,
+        COALESCE(m.display_name, m.username) AS author,
         (SELECT COUNT(*) FROM forum_replies r WHERE r.topic_id = t.id AND r.is_hidden = 0) AS replyCount
       FROM forum_topics t JOIN forum_members m ON m.id = t.author_id
-      WHERE ${where} ORDER BY t.updated_at DESC, t.id DESC LIMIT ? OFFSET ?
+      WHERE ${where} ORDER BY t.is_pinned DESC, t.updated_at DESC, t.id DESC LIMIT ? OFFSET ?
     `).bind(...args, PAGE_SIZE, (page - 1) * PAGE_SIZE).all();
     return json({ topics: rows.results, total: count.total, page, pageSize: PAGE_SIZE });
   }
@@ -259,7 +285,7 @@ async function handleTopics(db, request, segments, member) {
     if (!current) return fail("主题不存在。", 404);
     if (current.authorId !== member.id && member.role !== "admin") return fail("只能修改自己的主题。", 403);
     if (request.method === "DELETE") {
-      await db.prepare("UPDATE forum_topics SET is_hidden = 1 WHERE id = ?").bind(id).run();
+      await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0 WHERE id = ?").bind(id).run();
       return json({ ok: true });
     }
     const body = await readBody(request);
@@ -275,14 +301,15 @@ async function handleTopics(db, request, segments, member) {
     const page = pageNumber(url.searchParams.get("page"));
     const topic = await db.prepare(`
       SELECT t.id, t.category, t.title, t.body, t.is_locked AS isLocked,
-        t.created_at AS createdAt, t.updated_at AS updatedAt, m.username AS author, m.id AS authorId
+        t.is_pinned AS isPinned, t.created_at AS createdAt, t.updated_at AS updatedAt,
+        COALESCE(m.display_name, m.username) AS author, m.id AS authorId
       FROM forum_topics t JOIN forum_members m ON m.id = t.author_id
       WHERE t.id = ? AND t.is_hidden = 0
     `).bind(id).first();
     if (!topic) return fail("主题不存在或已被移除。", 404);
     const count = await db.prepare("SELECT COUNT(*) AS total FROM forum_replies WHERE topic_id = ? AND is_hidden = 0").bind(id).first();
     const replies = await db.prepare(`
-      SELECT r.id, r.body, r.created_at AS createdAt, m.username AS author, m.id AS authorId
+      SELECT r.id, r.body, r.created_at AS createdAt, COALESCE(m.display_name, m.username) AS author, m.id AS authorId
       FROM forum_replies r JOIN forum_members m ON m.id = r.author_id
       WHERE r.topic_id = ? AND r.is_hidden = 0 ORDER BY r.created_at, r.id LIMIT ? OFFSET ?
     `).bind(id, REPLY_PAGE_SIZE, (page - 1) * REPLY_PAGE_SIZE).all();
@@ -356,6 +383,7 @@ async function handleAdmin(db, request, segments, member) {
   if (denied) return denied;
   const [, resource, id, action] = segments;
   if (resource === "invites" && request.method === "POST" && !id) {
+    await cleanupTransientData(db);
     const code = randomHex(20);
     const now = Date.now();
     await db.prepare("INSERT INTO forum_invites (code_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?)")
@@ -365,7 +393,7 @@ async function handleAdmin(db, request, segments, member) {
   if (resource === "reports" && request.method === "GET" && !id) {
     const result = await db.prepare(`
       SELECT r.id, r.target_type AS targetType, r.target_id AS targetId, r.reason,
-        r.created_at AS createdAt, m.username AS reporter,
+        r.created_at AS createdAt, COALESCE(m.display_name, m.username) AS reporter,
         COALESCE(t.title, SUBSTR(p.body, 1, 60)) AS targetLabel,
         p.topic_id AS replyTopicId
       FROM forum_reports r JOIN forum_members m ON m.id = r.reporter_id
@@ -383,8 +411,25 @@ async function handleAdmin(db, request, segments, member) {
     const result = await db.prepare("UPDATE forum_topics SET is_locked = 1 - is_locked WHERE id = ? AND is_hidden = 0").bind(id).run();
     return result.meta.changes ? json({ ok: true }) : fail("主题不存在。", 404);
   }
+  if (resource === "topics" && id && request.method === "POST" && action === "pin") {
+    const body = await readBody(request);
+    if (typeof body.pinned !== "boolean") return fail("请指定是否置顶。", 400);
+    const topic = await db.prepare("SELECT is_pinned AS isPinned FROM forum_topics WHERE id = ? AND is_hidden = 0").bind(id).first();
+    if (!topic) return fail("主题不存在。", 404);
+    if (Boolean(topic.isPinned) === body.pinned) return json({ ok: true });
+    if (!body.pinned) {
+      await db.prepare("UPDATE forum_topics SET is_pinned = 0 WHERE id = ?").bind(id).run();
+      return json({ ok: true });
+    }
+    const result = await db.prepare(`
+      UPDATE forum_topics SET is_pinned = 1
+      WHERE id = ? AND is_hidden = 0 AND is_pinned = 0
+        AND (SELECT COUNT(*) FROM forum_topics WHERE is_pinned = 1 AND is_hidden = 0) < 3
+    `).bind(id).run();
+    return result.meta.changes ? json({ ok: true }) : fail("最多只能置顶 3 条主题。", 409);
+  }
   if (resource === "topics" && id && request.method === "DELETE" && !action) {
-    const result = await db.prepare("UPDATE forum_topics SET is_hidden = 1 WHERE id = ? AND is_hidden = 0").bind(id).run();
+    const result = await db.prepare("UPDATE forum_topics SET is_hidden = 1, is_pinned = 0 WHERE id = ? AND is_hidden = 0").bind(id).run();
     return result.meta.changes ? json({ ok: true }) : fail("主题不存在。", 404);
   }
   if (resource === "replies" && id && request.method === "DELETE" && !action) {

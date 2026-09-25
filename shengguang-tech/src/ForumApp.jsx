@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { MathContent, MathEditor } from "./ForumMath.jsx";
 
 const categories = [
   { id: "", label: "全部" },
@@ -66,6 +67,7 @@ export function ForumApp() {
   const [dialog, setDialog] = useState("");
   const [authMode, setAuthMode] = useState("login");
   const [authForm, setAuthForm] = useState({ username: "", password: "", inviteCode: "", setupKey: "" });
+  const [profileName, setProfileName] = useState("");
   const [draft, setDraft] = useState({ category: "discussion", title: "", body: "" });
   const [reply, setReply] = useState("");
   const [editedReply, setEditedReply] = useState({ id: "", body: "" });
@@ -146,7 +148,7 @@ export function ForumApp() {
       setStatus({ setupRequired: false, setupEnabled: false });
       setAuthForm({ username: "", password: "", inviteCode: "", setupKey: "" });
       setDialog("");
-      setNotice(`欢迎，${result.member.username}。`);
+      setNotice(`欢迎，${result.member.displayName || result.member.username}。`);
     } catch (cause) { setNotice(cause.message); }
     finally { setBusy(false); }
   }
@@ -158,6 +160,20 @@ export function ForumApp() {
       setDialog("");
       setNotice("已退出成员账号。");
     } catch (cause) { setNotice(cause.message); }
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const result = await forumApi("me", { method: "PATCH", body: JSON.stringify({ displayName: profileName }) });
+      setMember(result.member);
+      setDialog("");
+      if (topicId) await loadTopic();
+      else await loadFeed();
+      setNotice("昵称已更新。");
+    } catch (cause) { setNotice(cause.message); }
+    finally { setBusy(false); }
   }
 
   async function publishTopic(event) {
@@ -247,10 +263,10 @@ export function ForumApp() {
     finally { setBusy(false); }
   }
 
-  async function adminAction(path, method = "POST") {
+  async function adminAction(path, method = "POST", payload = {}) {
     setBusy(true);
     try {
-      await forumApi(`admin/${path}`, { method, body: method === "POST" ? "{}" : undefined });
+      await forumApi(`admin/${path}`, { method, body: method === "POST" ? JSON.stringify(payload) : undefined });
       if (path.startsWith("reports/")) await loadReports();
       if (path.startsWith("topics/") && method === "DELETE") navigateTopic(null);
       else if (topicId) await loadTopic();
@@ -284,7 +300,9 @@ export function ForumApp() {
           <a href="/">首页</a>
           <a className="is-current" href="/forum" aria-current="page">论坛</a>
           {member?.role === "admin" && <button type="button" onClick={() => { setDialog("admin"); loadReports().catch((cause) => setNotice(cause.message)); }}>管理</button>}
-          {member ? <button type="button" onClick={logout}>{member.username} · 退出</button> :
+          {member ? <>
+            <button className="forum-account-button" type="button" title="账户资料" onClick={() => { setProfileName(member.displayName || member.username); setDialog("profile"); }}>{member.displayName || member.username}</button>
+          </> :
             <button type="button" onClick={() => openAuth(status?.setupRequired ? "setup" : "login")}>{status?.setupRequired ? "初始化" : "成员登录"}</button>}
         </nav>
       </header>
@@ -326,7 +344,7 @@ export function ForumApp() {
               {loading ? <div className="forum-empty">正在读取讨论...</div> : error ? <div className="forum-empty is-error">{error}</div> : feed.topics.length ? <>
                 <div className="forum-list">
                   {feed.topics.map((item) => <button className="forum-topic-row" key={item.id} type="button" onClick={() => navigateTopic(item.id)}>
-                    <span className="forum-topic-meta">{categoryLabel(item.category)}{item.isLocked ? " · 已关闭" : ""}</span>
+                    <span className="forum-topic-meta">{item.isPinned ? <strong className="forum-pin-label">置顶</strong> : null}{categoryLabel(item.category)}{item.isLocked ? " · 已关闭" : ""}</span>
                     <span className="forum-topic-title">{item.title}</span>
                     <span className="forum-topic-excerpt">{item.body}</span>
                     <span className="forum-topic-foot">{item.author} <span>{dateLabel(item.updatedAt)}</span><span>{item.replyCount} 条回复</span></span>
@@ -338,10 +356,10 @@ export function ForumApp() {
               <button className="forum-back" type="button" onClick={() => navigateTopic(null)}>← 返回主题列表</button>
               {loading && !topic ? <div className="forum-empty">正在读取主题...</div> : error ? <div className="forum-empty is-error">{error}</div> : topic ? <>
                 <article className="forum-article">
-                  <div className="forum-article-meta">{categoryLabel(topic.topic.category)} · {dateLabel(topic.topic.createdAt)} {topic.topic.isLocked ? "· 已关闭回复" : ""}</div>
+                  <div className="forum-article-meta">{topic.topic.isPinned ? <strong className="forum-pin-label">置顶</strong> : null}{categoryLabel(topic.topic.category)} · {dateLabel(topic.topic.createdAt)} {topic.topic.isLocked ? "· 已关闭回复" : ""}</div>
                   <h2>{topic.topic.title}</h2>
                   <div className="forum-byline">由 {topic.topic.author} 发布</div>
-                  <div className="forum-body-text">{topic.topic.body}</div>
+                  <MathContent text={topic.topic.body} className="forum-body-text" />
                   <div className="forum-actions">
                     <button type="button" onClick={() => openReport("topic", topic.topic.id)}>举报</button>
                     {member?.id === topic.topic.authorId && <>
@@ -349,6 +367,7 @@ export function ForumApp() {
                       {member.role !== "admin" && <button type="button" disabled={busy} onClick={() => askRemoval(`topics/${topicId}`, true)}>撤回</button>}
                     </>}
                     {member?.role === "admin" && <>
+                      <button disabled={busy} type="button" onClick={() => adminAction(`topics/${topicId}/pin`, "POST", { pinned: !topic.topic.isPinned })}>{topic.topic.isPinned ? "取消置顶" : "置顶主题"}</button>
                       <button disabled={busy} type="button" onClick={() => adminAction(`topics/${topicId}/lock`)}>{topic.topic.isLocked ? "开放回复" : "关闭回复"}</button>
                       <button disabled={busy} type="button" onClick={() => askRemoval(`topics/${topicId}`, true, true)}>移除主题</button>
                     </>}
@@ -357,7 +376,7 @@ export function ForumApp() {
                 <div className="forum-replies-heading"><h3>回复 <span>{topic.totalReplies}</span></h3></div>
                 {topic.replies.map((item) => <article className="forum-reply" key={item.id}>
                   <div className="forum-reply-head"><strong>{item.author}</strong><time>{dateLabel(item.createdAt)}</time></div>
-                  <div className="forum-body-text">{item.body}</div>
+                  <MathContent text={item.body} className="forum-body-text" />
                   <div className="forum-actions"><button type="button" onClick={() => openReport("reply", item.id)}>举报</button>
                     {member?.id === item.authorId && <>
                       <button type="button" onClick={() => { setEditedReply({ id: item.id, body: item.body }); setDialog("editReply"); }}>编辑</button>
@@ -366,7 +385,7 @@ export function ForumApp() {
                     {member?.role === "admin" && <button disabled={busy} type="button" onClick={() => askRemoval(`replies/${item.id}`, false, true)}>移除</button>}</div>
                 </article>)}
                 {replyCount > 1 && <div className="forum-pagination"><button disabled={topicPage <= 1} onClick={() => setTopicPage(topicPage - 1)}>上一页</button><span>{topicPage} / {replyCount}</span><button disabled={topicPage >= replyCount} onClick={() => setTopicPage(topicPage + 1)}>下一页</button></div>}
-                {!topic.topic.isLocked && (member ? <form className="forum-reply-form" onSubmit={publishReply}><label htmlFor="forum-reply">参与讨论</label><textarea id="forum-reply" value={reply} onChange={(event) => setReply(event.target.value)} minLength={2} maxLength={3000} placeholder="写下你的想法..." required /><button className="forum-primary" type="submit" disabled={busy}>发布回复</button></form> : <button className="forum-login-prompt" type="button" onClick={() => openAuth()}>登录成员账号，参与讨论</button>)}
+                {!topic.topic.isLocked && (member ? <form className="forum-reply-form" onSubmit={publishReply}><MathEditor id="forum-reply" label="参与讨论" value={reply} onChange={setReply} minLength={2} maxLength={3000} placeholder="写下你的想法..." /><button className="forum-primary" type="submit" disabled={busy}>发布回复</button></form> : <button className="forum-login-prompt" type="button" onClick={() => openAuth()}>登录成员账号，参与讨论</button>)}
               </> : null}
             </>}
           </section>
@@ -381,9 +400,17 @@ export function ForumApp() {
           {authMode !== "setup" && <div className="forum-mode-switch"><button type="button" className={authMode === "login" ? "is-active" : ""} onClick={() => setAuthMode("login")}>登录</button><button type="button" className={authMode === "register" ? "is-active" : ""} onClick={() => setAuthMode("register")}>邀请码注册</button></div>}
           {authMode === "setup" && <><p className="forum-form-note">仅首次启用时使用。请填写 Cloudflare 中配置的初始化密钥。</p><label>初始化密钥<input type="password" value={authForm.setupKey} onChange={(event) => setAuthForm({ ...authForm, setupKey: event.target.value })} required /></label></>}
           {authMode === "register" && <label>邀请码<input value={authForm.inviteCode} onChange={(event) => setAuthForm({ ...authForm, inviteCode: event.target.value })} autoComplete="off" required /></label>}
-          <label>成员姓名<input autoFocus value={authForm.username} onChange={(event) => setAuthForm({ ...authForm, username: event.target.value })} minLength={2} maxLength={24} autoComplete="username" required /></label>
+          <label>登录名<input autoFocus value={authForm.username} onChange={(event) => setAuthForm({ ...authForm, username: event.target.value })} minLength={2} maxLength={24} autoComplete="username" required /></label>
           <label>密码<input type="password" value={authForm.password} onChange={(event) => setAuthForm({ ...authForm, password: event.target.value })} minLength={12} maxLength={128} autoComplete={authMode === "login" ? "current-password" : "new-password"} required /></label>
           <button className="forum-primary" type="submit" disabled={busy}>{busy ? "正在提交..." : authMode === "setup" ? "创建管理员" : authMode === "register" ? "注册并进入" : "登录"}</button>
+        </form>
+      </Modal>}
+
+      {dialog === "profile" && <Modal title="账户资料" onClose={() => setDialog("")}>
+        <form className="forum-form" onSubmit={saveProfile}>
+          <p className="forum-form-note">登录名：{member?.username}</p>
+          <label>公开昵称<input autoFocus value={profileName} onChange={(event) => setProfileName(event.target.value)} minLength={2} maxLength={24} required /></label>
+          <div className="forum-profile-actions"><button type="button" onClick={logout}>退出登录</button><button className="forum-primary" type="submit" disabled={busy}>保存昵称</button></div>
         </form>
       </Modal>}
 
@@ -391,7 +418,7 @@ export function ForumApp() {
         <form className="forum-form" onSubmit={publishTopic}>
           <label>分类<select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>{categories.filter((item) => item.id && (item.id !== "notice" || member?.role === "admin")).map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
           <label>标题<input autoFocus value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} minLength={4} maxLength={100} placeholder="为讨论起一个清晰的标题" required /></label>
-          <label>正文<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} minLength={20} maxLength={10000} placeholder="写下背景、想法或问题..." required /></label>
+          <MathEditor id="forum-new-topic-body" label="正文" value={draft.body} onChange={(body) => setDraft((current) => ({ ...current, body }))} minLength={20} maxLength={10000} placeholder="写下背景、想法或问题..." />
           <button className="forum-primary" type="submit" disabled={busy}>发布主题</button>
         </form>
       </Modal>}
@@ -399,14 +426,14 @@ export function ForumApp() {
       {dialog === "editTopic" && <Modal title="编辑主题" onClose={() => setDialog("")} wide>
         <form className="forum-form" onSubmit={saveTopic}>
           <label>标题<input autoFocus value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} minLength={4} maxLength={100} required /></label>
-          <label>正文<textarea value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} minLength={20} maxLength={10000} required /></label>
+          <MathEditor id="forum-edit-topic-body" label="正文" value={draft.body} onChange={(body) => setDraft((current) => ({ ...current, body }))} minLength={20} maxLength={10000} />
           <button className="forum-primary" type="submit" disabled={busy}>保存修改</button>
         </form>
       </Modal>}
 
       {dialog === "editReply" && <Modal title="编辑回复" onClose={() => setDialog("")}>
         <form className="forum-form" onSubmit={saveReply}>
-          <label>回复<textarea autoFocus value={editedReply.body} onChange={(event) => setEditedReply({ ...editedReply, body: event.target.value })} minLength={2} maxLength={3000} required /></label>
+          <MathEditor id="forum-edit-reply-body" label="回复" autoFocus value={editedReply.body} onChange={(body) => setEditedReply((current) => ({ ...current, body }))} minLength={2} maxLength={3000} />
           <button className="forum-primary" type="submit" disabled={busy}>保存修改</button>
         </form>
       </Modal>}
