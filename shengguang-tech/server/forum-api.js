@@ -1,3 +1,5 @@
+import { handleSaintLightRequest } from "./saint-light-api.js";
+
 const encoder = new TextEncoder();
 const SESSION_DAYS = 30;
 const PAGE_SIZE = 20;
@@ -113,6 +115,7 @@ async function cleanupTransientData(db, now = Date.now()) {
   await db.prepare("DELETE FROM forum_sessions WHERE expires_at <= ?").bind(now).run();
   await db.prepare("DELETE FROM forum_login_limits WHERE reset_at <= ?").bind(now).run();
   await db.prepare("DELETE FROM forum_password_resets WHERE expires_at <= ?").bind(now).run();
+  await db.prepare("DELETE FROM forum_ai_limits WHERE reset_at <= ?").bind(now).run();
 }
 
 async function loginLimited(db, request) {
@@ -540,7 +543,8 @@ export async function handleForumRequest(context) {
   if (!segments.length || segments.length > 4) return fail("接口不存在。", 404);
   try {
     const member = await sessionMember(env.FORUM_DB, request);
-    return await handleAuth(context, env.FORUM_DB, segments, member)
+    return await handleSaintLightRequest(context, member, segments)
+      || await handleAuth(context, env.FORUM_DB, segments, member)
       || await handleTopics(env.FORUM_DB, request, segments, member)
       || await handleReplies(env.FORUM_DB, request, segments, member)
       || await handleReports(env.FORUM_DB, request, segments, member)

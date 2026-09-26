@@ -1,0 +1,40 @@
+.saint-light-root { position: fixed; left: 22px; bottom: 20px; z-index: 120; font-family: "Microsoft YaHei", "PingFang SC", sans-serif; color: #f4ecd8; }
+.saint-light-root button { cursor: pointer; font: inherit; }
+.saint-light-root button:disabled { cursor: not-allowed; opacity: .5; }
+.saint-light-root :focus-visible { outline: 2px solid #efd48c; outline-offset: 2px; }
+.saint-light-launcher { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-width: 112px; min-height: 46px; padding: 0 15px; border: 1px solid #e5c979; border-radius: 5px; background: #dbc27f; box-shadow: 0 8px 34px #0009; color: #171912; font-size: 13px; font-weight: 600; }
+.saint-light-launcher:hover { background: #efd993; }
+.saint-light-panel { position: absolute; left: 0; bottom: 58px; display: flex; flex-direction: column; width: min(390px, calc(100vw - 32px)); height: min(530px, calc(100dvh - 126px)); overflow: hidden; border: 1px solid #6b6144; border-radius: 6px; background: #0d120f; box-shadow: 0 22px 70px #000b; }
+.saint-light-art { position: relative; flex: none; height: 142px; overflow: hidden; background: #cbd0df url("/assets/luoyun-shenglin.png") 75% 13% / 250% auto no-repeat; }
+.saint-light-art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, #0c110fe8 0%, #0c110f7a 55%, transparent 100%), linear-gradient(0deg, #0c110f80, transparent 54%); pointer-events: none; }
+.saint-light-art-copy { position: absolute; z-index: 1; left: 20px; bottom: 21px; }
+.saint-light-art-copy span { font-size: 11px; color: #dfcb91; }
+.saint-light-art-copy h2 { margin: 5px 0 0; font-family: "Songti SC", "STSong", "SimSun", serif; font-size: 25px; font-weight: 400; letter-spacing: 0; }
+.saint-light-icon { display: inline-grid; place-items: center; flex: none; width: 34px; height: 34px; border: 0; border-radius: 4px; background: transparent; color: #d6c998; }
+.saint-light-icon:hover { background: #efd48c1c; }
+.saint-light-close { position: absolute; z-index: 2; top: 10px; right: 10px; background: #09100fb0; }
+.saint-light-bar { display: flex; align-items: center; justify-content: space-between; flex: none; min-height: 48px; padding: 5px 11px 5px 14px; border-bottom: 1px solid #d0b98527; }
+.saint-light-tabs { display: flex; align-items: center; gap: 4px; }
+.saint-light-tabs button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 4px; background: transparent; color: #b9b3a0; font-size: 12px; }
+.saint-light-tabs button.active { background: #efd48c1c; color: #f3dfa4; }
+.saint-light-messages, .saint-light-help { min-height: 0; flex: 1; overflow-y: auto; padding: 18px; scrollbar-color: #655b3f transparent; }
+.saint-light-messages { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.saint-light-message { max-width: 88%; padding: 10px 12px; border: 1px solid #d0b9852e; border-radius: 5px; color: #eee6d3; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.saint-light-message.assistant { background: #1b211b; }
+.saint-light-message.user { align-self: flex-end; background: #3a3728; border-color: #d0b98545; }
+.saint-light-message.is-thinking { opacity: .63; }
+.saint-light-composer { flex: none; padding: 12px 14px 10px; border-top: 1px solid #d0b98529; }
+.saint-light-composer form { display: flex; align-items: end; gap: 8px; border: 1px solid #7e73504d; border-radius: 4px; background: #090d0b; padding: 6px; }
+.saint-light-composer textarea { display: block; flex: 1; min-width: 0; max-height: 100px; resize: vertical; border: 0; outline: none; padding: 6px; background: transparent; color: #f4ecd8; font: inherit; font-size: 13px; line-height: 1.5; }
+.saint-light-composer textarea::placeholder { color: #918d7e; }
+.saint-light-composer form button { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border: 0; border-radius: 3px; background: #e7ce8d; color: #151812; }
+.saint-light-meta { display: flex; justify-content: space-between; margin-top: 7px; color: #bcb5a0; font-size: 11px; }
+.saint-light-privacy { margin: 7px 0 0; color: #9f9b8d; font-size: 10px; line-height: 1.5; }
+.saint-light-error { margin: 0 0 8px; color: #f2b6a8; font-size: 12px; line-height: 1.45; }
+.saint-light-help article { padding: 0 0 15px; margin: 0 0 15px; border-bottom: 1px solid #d0b98529; }
+.saint-light-help h3 { margin: 0 0 7px; color: #efd48c; font-size: 13px; font-weight: 600; }
+.saint-light-help p { margin: 0 0 8px; color: #d1cbb9; font-size: 12px; line-height: 1.7; }
+.saint-light-help a { color: #efd48c; font-size: 11px; text-decoration: none; }
+.saint-light-help a:hover { text-decoration: underline; }
+.saint-light-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 560px) { .saint-light-root { left: 16px; bottom: 14px; } .saint-light-panel { bottom: 55px; height: min(610px, calc(100dvh - 84px)); } .saint-light-art { height: 120px; } .saint-light-messages, .saint-light-help { padding: 14px; } }

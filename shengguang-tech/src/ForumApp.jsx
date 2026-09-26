@@ -160,12 +160,14 @@ export function ForumApp() {
       });
       if (authMode === "reset") {
         setMember(null);
+        window.dispatchEvent(new Event("forum-auth-change"));
         setAuthForm({ username: "", password: "", inviteCode: "", setupKey: "", resetCode: "" });
         setAuthMode("login");
         setNotice("密码已重设，请使用新密码登录。");
         return;
       }
       setMember(result.member);
+      window.dispatchEvent(new Event("forum-auth-change"));
       setStatus({ setupRequired: false, setupEnabled: false });
       setAuthForm({ username: "", password: "", inviteCode: "", setupKey: "", resetCode: "" });
       setDialog("");
@@ -178,6 +180,7 @@ export function ForumApp() {
     try {
       await forumApi("logout", { method: "POST", body: "{}" });
       setMember(null);
+      window.dispatchEvent(new Event("forum-auth-change"));
       setDialog("");
       setNotice("已退出成员账号。");
     } catch (cause) { setNotice(cause.message); }

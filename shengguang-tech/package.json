@@ -9,6 +9,7 @@
         "db:local:init": "node node_modules/wrangler/bin/wrangler.js d1 execute FORUM_DB --local --file db/schema.sql --config wrangler.local.jsonc",
         "db:local:migrate": "node node_modules/wrangler/bin/wrangler.js d1 execute FORUM_DB --local --file db/migrations/001_forum_controls.sql --config wrangler.local.jsonc",
         "db:local:migrate:interactions": "node node_modules/wrangler/bin/wrangler.js d1 execute FORUM_DB --local --file db/migrations/002_forum_interactions.sql --config wrangler.local.jsonc",
+        "db:local:migrate:saint-light": "node node_modules/wrangler/bin/wrangler.js d1 execute FORUM_DB --local --file db/migrations/003_saint_light.sql --config wrangler.local.jsonc",
         "test": "node --test tests/*.test.mjs",
         "build": "vite build",
         "preview": "vite preview --host 127.0.0.1"
